@@ -1,0 +1,18 @@
+/*
+ * The devicetree overlay for this step.
+ *
+ * An overlay does not replace the board's devicetree — it is layered
+ * ON TOP of it at build time. The board file (nrf52840dk.dts) already
+ * defines led0 and button0; all we add here is a second set of names:
+ * the names our product thinks in.
+ *
+ * Zephyr picks this file up automatically: an application file named
+ * app.overlay (or <board>.overlay) is applied to every build.
+ */
+
+/ {
+	aliases {
+		room-led = &led0;	/* product name for the DK's LED 0     */
+		room-button = &button0;	/* product name for the DK's Button 1  */
+	};
+};
