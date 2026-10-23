@@ -3,12 +3,14 @@
 **What you do:** Build the image Step 1's client will
 actually fetch — v1.3.0, with a behavioural canary and the
 hardware-version window switched on — and then run the
-**server side** of the OTA conversation: a spare board as
-the radio, nrfutil as the librarian, your `.zigbee` file
-as the book. The client pulls it block by block while the
-occupancy loop never stops, reboots into Chapter 9's trial,
-confirms on join, and proves the update landed by
-*behaving* differently: the bulb's OFF delay is now 10 s.
+**server side** of the OTA conversation: a spare DK as
+the server, nrfutil as the librarian, your `.zigbee` file
+as the book. The client pulls it block by block over a
+dedicated update session on the server's network,
+reboots into Chapter 9's trial, returns to the product
+network, confirms on join, and proves the update landed
+by *behaving* differently: the bulb's OFF delay is now
+10 s.
 
 **What this step teaches:** That an OTA system is three
 artifacts, not one: the **client** (Step 1), the
@@ -79,65 +81,89 @@ is evidence.
 An honesty note before the commands, because this course
 labels its evidence: the **build-side** of this step is
 verified to the byte (above). The **over-the-air serving**
-below is desk procedure — it needs your physical boards,
-and nrfutil's `dfu` command is a separate install not
-present in the course's build environment, so the exact
-option spellings should be confirmed with
-`nrfutil dfu zigbee --help` on your machine. The flow
-itself is Nordic's documented one (the add-on's FOTA
-library documentation describes the same discovery, query,
-and server-managed upgrade the client implements).
+below is a desk procedure: it needs your physical boards,
+and it is written exactly as Nordic documents it, with
+the tool version and every option spelling verified
+against the installed tool's own `--help` (nRF Util
+**8.2.1**, `nrf5sdk-tools` **1.1.0**). It has not been run
+over the air in the course's build environment, which has
+no radios.
 
-You need: the DK running Step 1's client (v1.2.0, joined
-to the Chapter 5 network, bulb bound and working) and a
-**spare board** — the second DK, or the coordinator dongle
-reflashed — as the server's radio.
+The architecture: there is **no NCP sample to flash and
+no serial port to point at**. The host tool itself
+programs a **spare DK (PCA10056)** with its OTA Server
+firmware, that DK forms a small network on the channel
+you name, and the client must join *that* network for the
+update session. The session therefore does not run on the
+product network: the client returns afterwards, rejoins
+the Chapter 5 network, and only then confirms itself and
+resumes controlling the bulb. The tool's help says it in
+one line: the update "requires a second nRF device,
+connected to this computer, which shall serve as a OTA
+Server cluster." The server DK's previous contents are
+overwritten when the server starts, and the server stays
+active until that DK is reset.
 
-1. **Flash the server radio** with the add-on's NCP
-   sample (it ships `prj_dongle.conf` / `prj_usb.conf`
-   variants for exactly this host-driven role):
+You need: the DK running Step 1's client (v1.2.0) and a
+**spare DK** for the server.
 
-   ```bash
-   west build -p always -b nrf52840dk/nrf52840 \
-       <workspace>/ncs-zigbee/samples/ncp -- \
-       -DZEPHYR_EXTRA_MODULES=<workspace>/ncs-zigbee
-   west flash
-   ```
-
-2. **Install the host tool** (once): `nrfutil install dfu`.
-   The `dfu` command's `zigbee` subcommand is Nordic's OTA
-   server host: it drives the NCP radio and serves image
-   files to clients that come asking.
-
-3. **Serve the package**, pointing the tool at the NCP
-   board's serial port and this step's `.zigbee` file
-   (option names per `nrfutil dfu zigbee --help`; the
-   shape is):
+1. **Install the host tool** (once):
 
    ```bash
-   nrfutil dfu zigbee --file 127F-0141-01030000-occupancy.zigbee \
-       --port <server board port>
+   nrfutil install nrf5sdk-tools
+   nrfutil nrf5sdk-tools dfu zigbee --help
    ```
 
-   The server joins the network story at this point: it
-   holds exactly one image, addressed (manufacturer,
-   type, file version, HW window) to exactly our product.
+   (`nrfutil install dfu` does **not** work in this tool
+   generation: the registry answers that the package is
+   not found. The options are exactly `-f/--file`
+   (required), `-snr/--jlink_snr`, and `-chan/--channel`;
+   there is no `--port`, because the server board is
+   selected by J-Link serial number and *programmed* by
+   the tool.)
 
-4. **Watch the client do everything.** Expected sequence
-   at your desk: within a query cycle, the client
-   discovers the server, queries, and the DK's log begins
-   `OTA download: 0% … 25% … 50% …` (the progress events
-   Step 1 wired). ~6,800 blocks at 64 B payload — this
-   takes minutes; use them to walk in and out and confirm
-   the bulb still obeys *during* the transfer. Then
-   `OTA download complete - rebooting into the new image's
-   trial`, the swap pause, and `firmware v1.3.0`.
-5. **Collect the verdicts, in order:** the confirm line
-   (`joined and healthy - image CONFIRMED`) — Chapter 9's
-   policy judging an air-delivered image; `mcumgr image
-   list` over the cable showing slot 0 = 1.3.0 active +
-   confirmed; and the canary: **the bulb now obeys 10 s.**
-   Three independent witnesses, one conclusion.
+2. **Find the server DK's J-Link serial number** (also
+   printed on the DK's white label):
+
+   ```bash
+   nrfjprog --ids
+   ```
+
+3. **Serve the package**, on this course's network
+   channel, **11**:
+
+   ```bash
+   nrfutil nrf5sdk-tools dfu zigbee \
+       --file 127F-0141-01030000-occupancy.zigbee \
+       --channel 11 \
+       --jlink_snr <server DK serial number>
+   ```
+
+   The server holds exactly one image, addressed
+   (manufacturer, type, file version, HW window) to
+   exactly our product. That addressing is gate 1.
+
+4. **Run the session.** With the server running, factory
+   reset the client and let it join the server's network.
+   Expected sequence at your desk: within a query cycle,
+   the client discovers the server, queries, and the DK's
+   log begins `OTA download: 0% … 25% … 50% …` (the
+   progress events Step 1 wired). ~6,800 blocks at 64 B
+   payload: this takes minutes. During the session the
+   client is on the server's network, not the product
+   network, so the bulb does not obey occupancy until the
+   client comes home (step 5). Then `OTA download
+   complete - rebooting into the new image's trial`, the
+   swap pause, and `firmware v1.3.0`, unconfirmed.
+
+5. **Collect the verdicts, in order:** bring the client
+   home (factory reset, rejoin the Chapter 5 network);
+   the confirm line (`joined and healthy - image
+   CONFIRMED`), Chapter 9's policy judging an
+   air-delivered image; `mcumgr image list` over the
+   cable showing slot 0 = 1.3.0 active + confirmed; and
+   the canary: **the bulb now obeys 10 s.** Three
+   independent witnesses, one conclusion.
 
 ## Version policy, posted on the wall
 
