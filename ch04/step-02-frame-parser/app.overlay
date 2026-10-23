@@ -1,0 +1,13 @@
+/*
+ * The devicetree overlay for this step — same for all of Chapter 4.
+ *
+ * uart1 (RX P1.01, TX P1.02) ships disabled in the SoC; enabling
+ * it is the overlay's whole job. The baud rate is NOT set here:
+ * the LD2410's 256,000 is absent from Zephyr's devicetree baud
+ * table for this chip, so the code sets the UARTE divider
+ * register directly — the full story is told in Step 1.
+ */
+
+&uart1 {
+	status = "okay";
+};
