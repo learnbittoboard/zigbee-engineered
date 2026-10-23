@@ -1,0 +1,26 @@
+/*
+ * The devicetree overlay for this step — same for all of Chapter 4.
+ *
+ * The DK's devicetree already wires a SECOND UART, &uart1, to pins
+ * P1.01 (RX) and P1.02 (TX) — the board even labels it
+ * "arduino_serial", because those pins land on the Arduino-style
+ * headers. But the SoC ships uart1 DISABLED. Enabling it is our
+ * job, here.
+ *
+ * What is NOT here, deliberately: the baud rate. The LD2410 speaks
+ * at 256,000 baud — a speed Zephyr's devicetree binding for the
+ * nRF UARTE does not list (its standard-speed table jumps from
+ * 250,000 to 460,800, and the build refuses anything else). The
+ * hardware divider can generate 256,000 almost exactly, though,
+ * so the application sets it at run time, from the datasheet
+ * formula — read the comment above ld2410_apply_baud() in
+ * main.c; it is the most honest three lines in this chapter.
+ *
+ * The console (your logs) stays on uart0 / the USB virtual COM
+ * port, untouched. Sensor on uart1, logs on uart0: never let a
+ * peripheral you are debugging share the wire you debug through.
+ */
+
+&uart1 {
+	status = "okay";
+};
