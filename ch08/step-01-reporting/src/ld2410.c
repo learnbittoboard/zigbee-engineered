@@ -173,6 +173,17 @@ static void handle_payload(void)
 		return;
 	}
 
+	/* No checksum exists in this protocol, so valid markers do
+	 * not make the payload trustworthy: the target-state byte can
+	 * still be anything. Only 0..3 name a target; reject anything
+	 * else here, before the value is published as a reading and
+	 * used to index the app's 4-entry target_words table.
+	 */
+	if (ps_payload[2] > 3) {
+		parser_abort();
+		return;
+	}
+
 	struct ld2410_reading r = {
 		.target = (enum ld2410_target)ps_payload[2],
 		.move_distance_cm = sys_get_le16(&ps_payload[3]),

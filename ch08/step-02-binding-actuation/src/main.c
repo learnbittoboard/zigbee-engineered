@@ -404,7 +404,7 @@ static int cmd_presence(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "presence : no");
 		shell_print(sh, "distance : —");
 	} else {
-		shell_print(sh, "presence : YES (%s)", target_words[r.target]);
+		shell_print(sh, "presence : YES (%s)", target_words[(r.target < 4) ? r.target : 0]);
 		shell_print(sh, "distance : %u cm",
 			    ld2410_headline_distance_cm(&r));
 	}

@@ -185,6 +185,15 @@ static void handle_payload(void)
 		return;
 	}
 
+	/* The protocol has no checksum: a framed payload can still
+	 * carry a target-state byte outside 0..3. Reject it instead
+	 * of logging a reading for a target that does not exist.
+	 */
+	if (ps_payload[2] > 3) {
+		parser_abort("basic frame with invalid target state");
+		return;
+	}
+
 	struct ld2410_reading r = {
 		.target_state = ps_payload[2],
 		.move_distance_cm = sys_get_le16(&ps_payload[3]),

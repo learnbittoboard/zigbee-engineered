@@ -59,7 +59,7 @@ static void report_handler(struct k_work *work)
 		LOG_INF("presence: nobody in range");
 	} else {
 		LOG_INF("presence: someone (%s) — %u cm away",
-			target_words[r.target],
+			target_words[(r.target < 4) ? r.target : 0],
 			ld2410_headline_distance_cm(&r));
 	}
 }
@@ -117,7 +117,7 @@ static int cmd_presence(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "presence : no");
 		shell_print(sh, "distance : —");
 	} else {
-		shell_print(sh, "presence : YES (%s)", target_words[r.target]);
+		shell_print(sh, "presence : YES (%s)", target_words[(r.target < 4) ? r.target : 0]);
 		shell_print(sh, "distance : %u cm",
 			    ld2410_headline_distance_cm(&r));
 		shell_print(sh, "detail   : move %u cm (e%u), still %u cm (e%u)",
