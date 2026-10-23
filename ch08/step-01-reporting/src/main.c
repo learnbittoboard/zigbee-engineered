@@ -1,0 +1,430 @@
+/*
+ * Chapter 8, Step 1 — the endpoint learns to REPORT.
+ *
+ * Application code is Chapter 7, Step 2's, essentially untouched
+ * — and that is the step's entire point. The one change lives in
+ * include/zb_occupancy_sensor.h: the endpoint declaration now
+ * carries a REPORTING CONTEXT (one slot — the Occupancy
+ * attribute is the cluster's only reportable attribute). With
+ * storage to hold a reporting configuration, the stack can
+ * accept a Configure Reporting command from the coordinator and
+ * start volunteering the attribute's changes on the configured
+ * cadence, instead of waiting to be read.
+ *
+ * Nothing in this file "sends" a report. publish_occupancy()
+ * writes the value with ZB_ZCL_SET_ATTRIBUTE, exactly as in
+ * Chapter 7; the stack's reporting engine watches those writes,
+ * applies the min/max-interval and reportable-change rules it
+ * was configured with, and emits Report Attributes commands on
+ * its own schedule. Configuration is the coordinator's job
+ * (Chapter 5's `zcl subscribe`); cadence policy lives there too.
+ *
+ * The pipeline below the endpoint is unchanged on purpose:
+ *
+ *   LD2410 frame -> driver callback (parser thread)
+ *                -> transition filter (state changed?)
+ *                -> work item (system workqueue)
+ *                -> ZBOSS-scheduled publish_occupancy()
+ *                -> ZB_ZCL_SET_ATTRIBUTE (stack context)
+ *                -> [reporting engine: on change / on schedule]
+ */
+
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/shell/shell.h>
+#include <dk_buttons_and_leds.h>
+
+#include <zboss_api.h>
+#include <zigbee/zigbee_error_handler.h>
+#include <zigbee/zigbee_app_utils.h>
+#include <zb_nrf_platform.h>
+#include "zb_occupancy_sensor.h"
+
+#include "ld2410.h"
+
+
+/* Device endpoint — the same number Chapters 6–7 use throughout. */
+#define SENSOR_ENDPOINT                     10
+
+/* Type of power sources available for the device.
+ * For possible values see section 3.2.2.2.8 of ZCL specification.
+ */
+#define SENSOR_INIT_BASIC_POWER_SOURCE      ZB_ZCL_BASIC_POWER_SOURCE_DC_SOURCE
+
+/* LED indicating that device successfully joined Zigbee network. */
+#define ZIGBEE_NETWORK_STATE_LED            DK_LED3
+
+/* LED used for device identification. */
+#define IDENTIFY_LED                        DK_LED4
+
+/* Button used to enter the Identify mode. */
+#define IDENTIFY_MODE_BUTTON                DK_BTN4_MSK
+
+/* A long press of the same button is the factory reset. */
+#define FACTORY_RESET_BUTTON                IDENTIFY_MODE_BUTTON
+
+LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
+
+/* Application context: the attribute storage behind the endpoint's
+ * clusters. ZBOSS reads and writes these structs; the application
+ * owns them.
+ */
+struct zb_device_ctx {
+	zb_zcl_basic_attrs_t basic_attr;
+	zb_zcl_identify_attrs_t identify_attr;
+	zb_uint8_t occupancy;
+	zb_uint8_t occupancy_sensor_type;
+	zb_uint8_t occupancy_sensor_type_bitmap;
+};
+
+/* Zigbee device application context storage. */
+static struct zb_device_ctx dev_ctx;
+
+ZB_ZCL_DECLARE_IDENTIFY_ATTRIB_LIST(
+	identify_attr_list,
+	&dev_ctx.identify_attr.identify_time);
+
+ZB_ZCL_DECLARE_BASIC_ATTRIB_LIST(
+	basic_attr_list,
+	&dev_ctx.basic_attr.zcl_version,
+	&dev_ctx.basic_attr.power_source);
+
+ZB_ZCL_DECLARE_OCCUPANCY_SENSING_ATTRIB_LIST(
+	occupancy_attr_list,
+	&dev_ctx.occupancy,
+	&dev_ctx.occupancy_sensor_type,
+	&dev_ctx.occupancy_sensor_type_bitmap);
+
+ZB_DECLARE_OCCUPANCY_SENSOR_CLUSTER_LIST(
+	sensor_clusters,
+	basic_attr_list,
+	identify_attr_list,
+	occupancy_attr_list);
+
+ZB_DECLARE_OCCUPANCY_SENSOR_EP(
+	sensor_ep,
+	SENSOR_ENDPOINT,
+	sensor_clusters);
+
+ZBOSS_DECLARE_DEVICE_CTX_1_EP(
+	sensor_ctx,
+	sensor_ep);
+
+
+/**@brief Function for initializing all clusters attributes. */
+static void app_clusters_attr_init(void)
+{
+	/* Basic cluster attributes data */
+	dev_ctx.basic_attr.zcl_version = ZB_ZCL_VERSION;
+	dev_ctx.basic_attr.power_source = SENSOR_INIT_BASIC_POWER_SOURCE;
+
+	/* Identify cluster attributes data. */
+	dev_ctx.identify_attr.identify_time =
+		ZB_ZCL_IDENTIFY_IDENTIFY_TIME_DEFAULT_VALUE;
+
+	/* Occupancy Sensing attributes — see Step 1 for why an
+	 * mmWave radar honestly reports sensor type ULTRASONIC:
+	 * the ZCL enum has no radar value, and an active wave
+	 * sensor belongs to the ultrasonic family, not to PIR.
+	 */
+	dev_ctx.occupancy =
+		ZB_ZCL_OCCUPANCY_SENSING_OCCUPANCY_UNOCCUPIED;
+	dev_ctx.occupancy_sensor_type =
+		ZB_ZCL_OCCUPANCY_SENSING_OCCUPANCY_SENSOR_TYPE_ULTRASONIC;
+	dev_ctx.occupancy_sensor_type_bitmap =
+		ZB_ZCL_OCCUPANCY_SENSING_OCCUPANCY_SENSOR_TYPE_BITMAP_ULTRASONIC;
+}
+
+/**@brief Publish a new Occupancy value through the stack.
+ *
+ * Runs in ZBOSS scheduler context. ZB_ZCL_SET_ATTRIBUTE stores
+ * the value in dev_ctx — and, new in Chapter 8, the stack's
+ * reporting engine sees the write: if a coordinator configured
+ * reporting for this attribute, a change that passes the
+ * reportable-change test is emitted as a Report Attributes
+ * command (subject to the min/max intervals), with no further
+ * code here. The writer writes; the engine reports.
+ *
+ * @param  bufid  The new occupancy value (0 or 1), riding the
+ *                scheduler's parameter slot.
+ */
+static void publish_occupancy(zb_bufid_t bufid)
+{
+	zb_uint8_t occupied = (zb_uint8_t)bufid;
+
+	ZB_ZCL_SET_ATTRIBUTE(
+		SENSOR_ENDPOINT,
+		ZB_ZCL_CLUSTER_ID_OCCUPANCY_SENSING,
+		ZB_ZCL_CLUSTER_SERVER_ROLE,
+		ZB_ZCL_ATTR_OCCUPANCY_SENSING_OCCUPANCY_ID,
+		&occupied,
+		ZB_FALSE);
+
+	LOG_INF("Occupancy attribute -> %s",
+		occupied ? "OCCUPIED" : "UNOCCUPIED");
+}
+
+/* ------------------------------------------------------------------ */
+/* The sensor glue — driver readings become attribute writes.          */
+/* ------------------------------------------------------------------ */
+
+static const struct device *const sensor_uart =
+	DEVICE_DT_GET(DT_NODELABEL(uart1));
+
+static struct k_work publish_work;
+
+/* Workqueue context: re-read the FRESHEST snapshot (a burst of
+ * frames between callback and work collapses into one truthful
+ * write), derive the boolean, and hand the write to the stack's
+ * own scheduler — attribute writes belong in ZBOSS context.
+ */
+static void publish_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	struct ld2410_reading r;
+
+	if (!ld2410_latest(&r)) {
+		return;
+	}
+
+	zb_uint8_t occupied = (r.target != LD2410_TARGET_NONE) ?
+		ZB_ZCL_OCCUPANCY_SENSING_OCCUPANCY_OCCUPIED :
+		ZB_ZCL_OCCUPANCY_SENSING_OCCUPANCY_UNOCCUPIED;
+
+	ZB_SCHEDULE_APP_CALLBACK(publish_occupancy, occupied);
+}
+
+/* Driver callback — parser-thread context, so: filter + defer,
+ * exactly the contract ld2410.h states. The attribute is a
+ * boolean, so the only event worth forwarding is a TRANSITION:
+ * target appeared (NONE -> anything) or vanished (anything ->
+ * NONE). Distance wiggles inside a state are Chapter 4's
+ * deadband problem; a boolean has nothing to wiggle.
+ */
+static bool last_occupied;
+
+static void on_reading(const struct ld2410_reading *r, void *user_data)
+{
+	ARG_UNUSED(user_data);
+
+	bool occupied = (r->target != LD2410_TARGET_NONE);
+
+	if (occupied != last_occupied) {
+		last_occupied = occupied;
+		k_work_submit(&publish_work);
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* The shell command — Chapter 4's `presence`, one line richer:        */
+/* it now also shows what the NETWORK believes (the attribute).         */
+/* ------------------------------------------------------------------ */
+
+static const char *const target_words[] = {
+	"nobody", "moving", "stationary", "moving + stationary"
+};
+
+static int cmd_presence(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	struct ld2410_reading r;
+	struct ld2410_stats s;
+
+	ld2410_stats(&s);
+
+	if (!ld2410_latest(&r)) {
+		shell_print(sh, "presence : no valid frame received yet");
+	} else if (r.target == LD2410_TARGET_NONE) {
+		shell_print(sh, "presence : no");
+		shell_print(sh, "distance : —");
+	} else {
+		shell_print(sh, "presence : YES (%s)", target_words[r.target]);
+		shell_print(sh, "distance : %u cm",
+			    ld2410_headline_distance_cm(&r));
+	}
+
+	shell_print(sh, "attribute: Occupancy = %u (%s)",
+		    dev_ctx.occupancy,
+		    dev_ctx.occupancy ? "OCCUPIED" : "UNOCCUPIED");
+	shell_print(sh, "frames   : %u parsed, %u resyncs, %u dropped bytes, "
+		    "%u engineering frames",
+		    s.frames_ok, s.resyncs, s.rx_dropped, s.eng_frames);
+
+	return 0;
+}
+
+SHELL_CMD_REGISTER(presence, NULL,
+		   "Show live LD2410 presence, driver statistics, and the Occupancy attribute",
+		   cmd_presence);
+
+/**@brief Function to toggle the identify LED
+ *
+ * @param  bufid  Unused parameter, required by ZBOSS scheduler API.
+ */
+static void toggle_identify_led(zb_bufid_t bufid)
+{
+	static int blink_status;
+
+	dk_set_led(IDENTIFY_LED, (++blink_status) % 2);
+	ZB_SCHEDULE_APP_ALARM(toggle_identify_led, bufid, ZB_MILLISECONDS_TO_BEACON_INTERVAL(100));
+}
+
+/**@brief Function to handle identify notification events on the endpoint.
+ *
+ * @param  bufid  Unused parameter, required by ZBOSS scheduler API.
+ */
+static void identify_cb(zb_bufid_t bufid)
+{
+	zb_ret_t zb_err_code;
+
+	if (bufid) {
+		/* Schedule a self-scheduling function that will toggle the LED */
+		ZB_SCHEDULE_APP_CALLBACK(toggle_identify_led, bufid);
+	} else {
+		/* Cancel the toggling function alarm and turn off LED */
+		zb_err_code = ZB_SCHEDULE_APP_ALARM_CANCEL(toggle_identify_led, ZB_ALARM_ANY_PARAM);
+		ZVUNUSED(zb_err_code);
+
+		dk_set_led(IDENTIFY_LED, 0);
+	}
+}
+
+/**@brief Starts identifying the device.
+ *
+ * @param  bufid  Unused parameter, required by ZBOSS scheduler API.
+ */
+static void start_identifying(zb_bufid_t bufid)
+{
+	ZVUNUSED(bufid);
+
+	if (ZB_JOINED()) {
+		if (dev_ctx.identify_attr.identify_time ==
+		ZB_ZCL_IDENTIFY_IDENTIFY_TIME_DEFAULT_VALUE) {
+
+			zb_ret_t zb_err_code = zb_bdb_finding_binding_target(
+				SENSOR_ENDPOINT);
+
+			if (zb_err_code == RET_OK) {
+				LOG_INF("Enter identify mode");
+			} else if (zb_err_code == RET_INVALID_STATE) {
+				LOG_WRN("RET_INVALID_STATE - Cannot enter identify mode");
+			} else {
+				ZB_ERROR_CHECK(zb_err_code);
+			}
+		} else {
+			LOG_INF("Cancel identify mode");
+			zb_bdb_finding_binding_target_cancel();
+		}
+	} else {
+		LOG_WRN("Device not in a network - cannot enter identify mode");
+	}
+}
+
+/**@brief Callback for button events.
+ *
+ * Button 1's simulation job is done — the sensor owns occupancy
+ * now. Button 4 keeps its Chapter 6 duties (identify / reset).
+ */
+static void button_changed(uint32_t button_state, uint32_t has_changed)
+{
+	if (IDENTIFY_MODE_BUTTON & has_changed) {
+		if (IDENTIFY_MODE_BUTTON & button_state) {
+			/* Button changed its state to pressed */
+		} else {
+			/* Button changed its state to released */
+			if (was_factory_reset_done()) {
+				/* The long press was for Factory Reset */
+				LOG_DBG("After Factory Reset - ignore button release");
+			} else   {
+				/* Button released before Factory Reset */
+
+				/* Start identification mode */
+				ZB_SCHEDULE_APP_CALLBACK(start_identifying, 0);
+			}
+		}
+	}
+
+	check_factory_reset_button(button_state, has_changed);
+}
+
+/**@brief Function for initializing LEDs and Buttons. */
+static void configure_gpio(void)
+{
+	int err;
+
+	err = dk_buttons_init(button_changed);
+	if (err) {
+		LOG_ERR("Cannot init buttons (err: %d)", err);
+	}
+
+	err = dk_leds_init();
+	if (err) {
+		LOG_ERR("Cannot init LEDs (err: %d)", err);
+	}
+}
+
+/**@brief Zigbee stack event handler — Chapter 6's, unchanged. */
+void zboss_signal_handler(zb_bufid_t bufid)
+{
+	/* Update network status LED. */
+	zigbee_led_status_update(bufid, ZIGBEE_NETWORK_STATE_LED);
+
+	/* No application-specific behavior is required.
+	 * Call default signal handler.
+	 */
+	ZB_ERROR_CHECK(zigbee_default_signal_handler(bufid));
+
+	/* All callbacks should either reuse or free passed buffers.
+	 * If bufid == 0, the buffer is invalid (not passed).
+	 */
+	if (bufid) {
+		zb_buf_free(bufid);
+	}
+}
+
+int main(void)
+{
+	LOG_INF("Starting Zigbee, Engineered - occupancy endpoint (reporting enabled)");
+
+	/* Initialize */
+	configure_gpio();
+	register_factory_reset_button(FACTORY_RESET_BUTTON);
+
+	/* Register device context (endpoints). */
+	ZB_AF_REGISTER_DEVICE_CTX(&sensor_ctx);
+
+	app_clusters_attr_init();
+
+	/* Register handlers to identify notifications */
+	ZB_AF_SET_IDENTIFY_NOTIFICATION_HANDLER(SENSOR_ENDPOINT, identify_cb);
+
+	/* Start Chapter 4's driver on uart1 — the same call, the
+	 * same contract as in its own chapter. A failed start is
+	 * loud but not fatal to the Zigbee side: the endpoint still
+	 * joins and answers (with a permanently unoccupied
+	 * attribute), and the log says exactly why.
+	 */
+	k_work_init(&publish_work, publish_handler);
+
+	int err = ld2410_start(sensor_uart, on_reading, NULL);
+
+	if (err != 0) {
+		LOG_ERR("LD2410 driver failed to start (%d) - "
+			"endpoint will report UNOCCUPIED; check the overlay/wiring",
+			err);
+	}
+
+	/* Start Zigbee default thread */
+	zigbee_enable();
+
+	LOG_INF("Endpoint 10 live: Occupancy follows the LD2410, and the "
+		"endpoint now accepts reporting configuration - subscribe "
+		"from the coordinator with zcl subscribe");
+
+	return 0;
+}
