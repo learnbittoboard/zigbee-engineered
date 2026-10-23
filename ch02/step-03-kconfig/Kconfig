@@ -1,0 +1,41 @@
+# Chapter 2, Step 3 — the application's OWN Kconfig options.
+#
+# A file named "Kconfig" in the application root is picked up by the
+# build automatically. This is where the product defines the knobs
+# that belong to IT (as opposed to CONFIG_* options that belong to
+# Zephyr itself, which we only SET in prj.conf).
+#
+# The last line is mandatory in an application Kconfig file: it pulls
+# in the rest of the Zephyr Kconfig tree.
+
+menu "Room sensor demo"
+
+config ROOM_BLINK_PERIOD_MS
+	int "Sensor poll / heartbeat period (ms)"
+	default 1000
+	help
+	  How often the main loop polls the simulated sensor. A product
+	  tunes numbers like this without touching C code — prj.conf (or
+	  a board-specific config fragment) just overrides the default.
+
+config ROOM_FEATURE_HEARTBEAT_LOG
+	bool "Print a heartbeat log line every period"
+	default y
+	help
+	  A demo "feature switch": when this is off, the heartbeat code
+	  is not merely skipped at runtime — it is compiled out of the
+	  firmware entirely, because main.c tests it with IS_ENABLED().
+
+endmenu
+
+# Per-module log-level symbols for OUR OWN module do not appear by
+# magic: they exist only where a Kconfig file instantiates Zephyr's
+# log-config template for that module name. Zephyr's subsystems do
+# this for their modules; this line does it for "sim", creating
+# CONFIG_SIM_LOG_LEVEL_DBG and friends — which is what allows
+# prj.conf to raise just this one module to DBG.
+module = SIM
+module-str = Simulated sensor (Chapter 2 demo)
+source "subsys/logging/Kconfig.template.log_config"
+
+source "Kconfig.zephyr"
