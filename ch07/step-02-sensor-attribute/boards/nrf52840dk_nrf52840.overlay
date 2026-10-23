@@ -1,0 +1,31 @@
+/*
+ * Copyright (c) 2025 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */
+
+#include <nrf52840_partitions.dtsi>
+
+/ {
+	chosen {
+		ncs,zigbee-timer = &timer2;
+	};
+};
+
+&timer2 {
+	status = "okay";
+};
+
+/*
+ * Chapter 7, Step 2 addition: the LD2410's UART.
+ *
+ * uart1 (RX P1.01, TX P1.02) ships disabled in the SoC; enabling
+ * it is this block's whole job — the same overlay Chapter 4 used.
+ * The baud rate is NOT set here: the module's 256,000 baud is
+ * absent from Zephyr's devicetree baud table for this chip, so
+ * the driver sets the UARTE divider register directly (the full
+ * story is Chapter 4's fix F3; ld2410.c owns the quirk).
+ */
+&uart1 {
+	status = "okay";
+};
