@@ -1,0 +1,16 @@
+# Chapter 4, Step 3 — the application's own Kconfig.
+#
+# This app defines no product knobs of its own; the file exists for
+# the two lines at the bottom. Per-module log-level symbols for OUR
+# module do not appear by magic: they exist only where a Kconfig
+# file instantiates Zephyr's log-config template for that module
+# name (Chapter 2, Step 3 taught this for the SIM module). This
+# does it for LD2410, creating CONFIG_LD2410_LOG_LEVEL_DBG and
+# friends — which is what lets prj.conf quieten or unleash the
+# driver without touching the application module.
+
+module = LD2410
+module-str = HLK-LD2410 driver (Chapter 4)
+source "subsys/logging/Kconfig.template.log_config"
+
+source "Kconfig.zephyr"
