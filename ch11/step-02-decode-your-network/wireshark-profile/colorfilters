@@ -1,0 +1,14 @@
+# Zigbee, Engineered -- course coloring rules.
+# Format: @name@filter@[bg rgb][fg rgb], components decimal 0-65535.
+# First match wins: specific rules are listed before general ones.
+# Install: see ../README.md (copy this file into the course Wireshark profile).
+@JOIN - Transport Key (the NWK key crosses the air)@zbee_aps.cmd.id == 0x05@[50886,10280,10280][65535,65535,65535]
+@JOIN - MAC association@wpan.cmd == 0x01 || wpan.cmd == 0x02@[37008,51914,63993][0,0,0]
+@JOIN - beacon request and beacons@wpan.cmd == 0x07 || wpan.frame_type == 0x00@[57825,48830,59367][0,0,0]
+@JOIN - Device Announce (ZDO)@zbee_aps.zdp_cluster == 0x0013 || zbee_aps.cluster == 0x0013@[46003,40349,56283][0,0,0]
+@Occupancy REPORT (cluster 0x0406)@zbee_aps.cluster == 0x0406 && zbee_zcl.cmd.id == 0x0a@[33153,51143,33924][0,0,0]
+@Occupancy cluster, other commands@zbee_aps.cluster == 0x0406@[51400,59110,51657][0,0,0]
+@On/Off commands to the bulb (0x0006)@zbee_aps.cluster == 0x0006@[65535,61937,30326][0,0,0]
+@OTA upgrade traffic (0x0019)@zbee_aps.cluster == 0x0019@[62708,36751,45489][0,0,0]
+@NWK command frames (routes, link status)@zbee_nwk.frame_type == 0x01@[45232,48830,50629][0,0,0]
+@MAC acknowledgements@wpan.frame_type == 0x02@[61166,61166,61166][0,0,0]

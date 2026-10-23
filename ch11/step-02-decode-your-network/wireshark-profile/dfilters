@@ -1,0 +1,17 @@
+# Zigbee, Engineered -- saved display filters (Wireshark 'dfilters' file).
+# Format: one saved filter per line: "Name" expression
+# Install: see ../README.md (copy this file into the course Wireshark profile).
+"Join: the whole MAC exchange" wpan.cmd == 0x01 || wpan.cmd == 0x02 || wpan.cmd == 0x04 || wpan.cmd == 0x07 || wpan.frame_type == 0x00
+"Join: Transport Key only" zbee_aps.cmd.id == 0x05
+"Join: Device Announce only" zbee_aps.zdp_cluster == 0x0013 || zbee_aps.cluster == 0x0013
+"From the coordinator (NWK src 0x0000)" zbee_nwk.src == 0x0000
+"Occupancy reports" zbee_aps.cluster == 0x0406 && zbee_zcl.cmd.id == 0x0a
+"Occupancy attribute records" zbee_aps.cluster == 0x0406 && zbee_zcl.attr.id == 0x0000
+"Configure Reporting commands (Chapter 8 setup)" zbee_zcl.cmd.id == 0x06
+"Bulb On/Off commands" zbee_aps.cluster == 0x0006 && zbee_zcl.cs.cmd.id <= 0x02
+"OTA: all upgrade traffic" zbee_aps.cluster == 0x0019
+"OTA: Query Next Image + Response (the gates)" zbee_aps.cluster == 0x0019 && (zbee_zcl.cs.cmd.id == 0x01 || zbee_zcl.cs.cmd.id == 0x02)
+"OTA: Image Block Requests only (count these)" zbee_aps.cluster == 0x0019 && zbee_zcl.cs.cmd.id == 0x03
+"OTA: Upgrade End handshake" zbee_aps.cluster == 0x0019 && (zbee_zcl.cs.cmd.id == 0x06 || zbee_zcl.cs.cmd.id == 0x07)
+"NWK command frames" zbee_nwk.frame_type == 0x01
+"Hide MAC ACKs and beacons" !(wpan.frame_type == 0x02) && !(wpan.frame_type == 0x00)
