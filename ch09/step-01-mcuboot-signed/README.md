@@ -67,7 +67,7 @@ west flash
 
 The build runs the app build, then the MCUboot build, then
 **imgtool** over the app binary. Verified sizes from this
-step's build: the app takes 422,328 B of its 916 KB slot
+step's build: the app takes 422,352 B of its 916 KB slot
 (45.4%) and 76,728 B RAM; MCUboot takes 24,088 B of its
 64 KB (36.8%). Now prove the signing happened — three
 artifacts, three different witnesses:
