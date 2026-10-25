@@ -8,8 +8,9 @@ course, and the difference between `printk()` and the logging module.
 
 ## Build and flash
 
-From this folder, inside your nRF Connect SDK terminal (versions pinned:
-NCS v3.4.1, board `nrf52840dk/nrf52840`):
+From this folder, in a toolchain terminal (the nRF Connect terminal
+inside VS Code; see Chapter 1, Install Step 5). Versions pinned:
+NCS v3.4.1, board `nrf52840dk/nrf52840`:
 
 ```bash
 west build -p always -b nrf52840dk/nrf52840
@@ -22,7 +23,7 @@ change `prj.conf` or the devicetree — incremental builds do not always notice.
 ## Connect a terminal
 
 The DK shows up as a USB serial port. Open it at **115200 baud, 8N1**
-(nRF Serial Terminal, PuTTY, `screen`, tio — any of them), then press the
+(the nRF Terminal in VS Code, PuTTY, `screen`, tio — any of them), then press the
 board's RESET button.
 
 ## What you should observe
