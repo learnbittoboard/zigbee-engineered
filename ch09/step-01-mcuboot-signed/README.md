@@ -174,5 +174,13 @@ Steps 2 and 3 are that sentence, made into an experiment.
    header's version, and the zip's manifest. Which audiences
    now disagree about the device's version? Fix it properly
    and verify all three agree.
-2. With the board running this step,
+2. With the board running this step, ask it for its slot
+   state (`mcumgr --conntype serial --connstring
+   portdev=<your port>,baud=115200 image list`). Write down,
+   in your own words: which slot is active, which flags it
+   carries, and why slot 1 is empty. Then answer the
+   chapter's smallest exam question: this image never calls
+   the image-confirm API, so why is it not on trial? (If
+   your answer is about how the image *arrived*, you have
+   it.)
 ...[truncated 1357 chars]
