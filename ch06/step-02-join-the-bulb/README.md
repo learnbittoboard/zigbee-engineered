@@ -6,6 +6,13 @@ Chapter 5 DK and your Step 1 skeleton — entirely from the
 coordinator shell. The bulb ships with firmware you will never see;
 everything you learn about it, you learn through the toolkit.
 
+> **Bulb choice:** any Zigbee 3.0 bulb works for this lab;
+> everything asked of it is standard Zigbee. The procedure and
+> captures use an IKEA TRÅDFRI. With a different bulb, factory-reset
+> it by its own manual's ritual (usually a similar power-cycle
+> count) and expect its manufacturer string and readbacks to differ
+> from the captures.
+
 **What this step teaches:** Commissioning's hard case — a *closed*
 device. No logs, no shell, no source: one documented reset ritual,
 one association handshake, and whatever the network can be asked.
